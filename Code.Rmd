@@ -1,6 +1,6 @@
 ---
-title: "Statistical Computing Assignment 3"
-author: "Mahmood-Ali Parker (PRKMAH005)"
+title: "Acceptance Rejection Algorithm Exercise"
+author: "Mahmood-Ali Parker"
 date: "07/04/2021"
 header-includes:
   - \usepackage[font={small,it}, labelfont={bf}]{caption}
