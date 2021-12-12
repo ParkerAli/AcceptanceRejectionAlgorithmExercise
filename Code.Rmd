@@ -1,0 +1,426 @@
+---
+title: "Statistical Computing Assignment 3"
+author: "Mahmood-Ali Parker (PRKMAH005)"
+date: "07/04/2021"
+header-includes:
+  - \usepackage[font={small,it}, labelfont={bf}]{caption}
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.width=5, fig.height=3, fig.align= 'center')
+```
+
+```{r, echo=F, include=F}
+library("readxl")
+set.seed(43)
+x = read_excel("RandomData2021.xlsx")$prkmah005
+```
+\tableofcontents
+
+\newpage
+
+\section{(a) Using the Acceptance-rejection Algorithm to Sample from $\pi(\alpha,\beta|x)$}
+### Understanding the Posterior Distribution
+We need to sample from our posterior distribution, $\pi(\alpha,\beta|x)$. We know that the posterior distribution is given by
+\begin{equation*}
+\begin{split}
+\pi(\alpha,\beta|x) \propto \pi(\alpha,\beta)*L(x,\alpha,\beta)
+\end{split}
+\end{equation*}
+and we're given the likelihood, $L(x,\alpha,\beta)$ as
+\begin{equation*}
+\begin{split}
+L(x,\alpha,\beta) \propto (\frac{\beta}{A(\alpha,\beta)})^{200} * \Pi^{200}_{i=1}(\frac{1}{\beta^2+(x_i-\alpha)^2}),\beta>0, 0<\alpha<5
+\end{split}
+\end{equation*}
+We also know that $\alpha$ and $\beta$ are independent and hence we can deduce that:
+\begin{equation*}
+\begin{split}
+\pi(\alpha,\beta) = \pi(\alpha)\pi(\beta)
+\end{split}
+\end{equation*}
+Given that $\alpha$~U(0,5) and $\beta$~$\Gamma$(4,8) we have our posterior distribution as:
+\begin{equation*}
+\begin{split}
+\pi(\alpha,\beta|x) \propto \beta^3e^{-8\beta}  (\frac{\beta}{A(\alpha,\beta)})^{200} * \Pi^{200}_{i=1}(\frac{1}{\beta^2+(x_i-\alpha)^2})
+\end{split}
+\end{equation*}
+
+For ease of computation and to prevent numerical overflow and underflow, we can also derive the log posterior distribution:
+\begin{equation*}
+\begin{split}
+\log(\pi(\alpha,\beta|x)) \propto 3 \log\beta - 8\beta+ 200 \log(\frac{\beta}{A(\alpha,\beta}) +  \Sigma^{200}_{i=1}\log(\frac{1}{\beta^2+(x_i-\alpha)^2})
+\end{split}
+\end{equation*}
+
+We start by creating a function in R to compute the vector of log-posterior values of a parameterised $(\alpha , \beta )$ vector pair given the data, X according to the formula above.
+```{r, echo=F}
+log_post_x <- function(a,b){ #b>0 and 0<a<5
+  lprior= 3*log(b) - 8*b # the log prior
+  summation=c(1:length(a)) #the summation term in the formula to be calculated
+  for(i in 1:length(a)){
+    summation[i]=0
+    for (j in 1:200){
+      summation[i]= summation[i] + log( b[i]^2 + (x[j] - a[i])^2)
+    }
+  }
+  ll = 200*(log(b) - log(atan(a/b) + atan((5-a)/b))) - summation #log-likelihood
+  log_posterior = lprior +ll #log-posterior
+  return (log_posterior)
+}
+```
+Using, this log-posterior function, we create another function to compute the exponent of the log-posterior to get the posterior values of a parameterised $(\alpha, \beta)$ vector pair.
+```{r, echo=F}
+post_x <- function(a,b){ 
+  return(exp(log_post_x(a,b))) #posterior is exp(log-posterior)
+}
+```
+With the posterior and log-posterior functions, we can now plot these functions  using R's contour() and persp() functions.
+```{r, echo=F}
+knitr::opts_chunk$set(fig.cap = "Contour plot of the posterior mass of $\\alpha$ $\\epsilon$ [1.9, 2.8] and $\\beta$ $\\epsilon$ [0.5, 1]. Plotted with R's filled.contour()")
+```
+```{r, echo=F}
+a_range2 <- seq(from=1.9, to=2.8, length=100)
+b_range2 <- seq(from=0.5, to=1.2, length=100)
+k2.2 = outer(a_range2, b_range2, post_x)
+filled.contour(a_range2, b_range2, k2.2, nlevels = 12, xlab = expression(alpha), ylab=expression(beta), color.palette = heat.colors, main = "Posterior Mass")
+```
+
+\newpage
+
+From Figure 1, we can observe that the mode of the distribution is at approximately $\alpha = 2.35$ and $\beta = 0.75$ and that the majority of the mass lies between $\alpha \epsilon [2.2, 2.5]$ and $\beta \epsilon [0.6, 9]$ . To get exact modal values for the parameters, we will optimise the log-posterior distribution to find $\alpha$ and $\beta$. The 3-D distribution plots in Figure 5 (see appendix) also show that a large mass of the posterior distribution is in a small area (denoted by a sharp peak and flat everywhere else).
+
+### Finding the Mode of the Posterior Distribution
+We start the sampling process by finding the modal values for $\alpha$ and $\beta$. I implemented the Gauss-Seidel algorithm with a function, gaussSeidel(a,b,tol,fn), by iterating over R's optimize() function with a while-loop until both $\alpha$ and $\beta$ converge to optimal parameter values (subject to a tolerance). The function returns the optimal $\alpha$, $\beta$ and the value of the objective function at convergence. Also worth noting is that the search ranges are set to $\alpha \epsilon[0, 5]$ and $\beta \epsilon[0, 10^{15}]$.
+```{r, echo=F}
+gaussSeidel = function(a,b,tol,fn){
+  a.old = a-1 #ensures loop runs
+  b.old = b-1 #ensures loops runs
+  while(!(abs(a - a.old) < tol & abs(b - b.old) < tol)){
+    a.old = a #update
+    b.old = b #update
+    c.old = c
+    # optimize a, given current b
+    a <- optimize(fn, c(0, 5), b = b, maximum = T)$maximum
+    # optimize b, given current a
+    b <- optimize(fn, c(0, 1e15), a = a, maximum=T)$maximum
+    c <- fn(a,b) #objective
+  }
+  return(c(a, b, c)) #returns a,b and optimal objective
+}
+```
+```{r, echo=F, include=F}
+#optimal params and maximum log posterior
+ModeParams = gaussSeidel(3,10,0.00000001,log_post_x)
+ModeParams 
+```
+Running the gaussSeidel() function with (arbitrary) starting points of (3,10) to optimise the log-posterior function yields $\alpha = 2.358$ and $\beta = 0.75$ with a log-posterior objective value of -267.111. We can therefore conclude that the mode of our posterior distribution is the point (2.358, 0.75). We will use these modal parameters to help with the sampling process. 
+
+### Accept-reject Sampling
+We can now proceed with the Accept-reject method.
+The first step is to define our target distribution as the posterior distribution, $\pi(\alpha,\beta |x)$. This is the distribution we intend to obtain a sample from.
+
+Second, we define the candidate distribution, $h(\alpha, \beta)$. The candidate distribution is the distribution that we will sample from for the acceptance-rejection algorithm until we have a sufficient number of samples. We choose our candidate distribution, $h(\alpha, \beta)$ to be our prior distribution $\pi(\alpha,\beta)$:
+\begin{equation*}
+\begin{split}
+h(\alpha, \beta) = \pi(\alpha,\beta) \propto \beta^3e^{-8\beta}
+\end{split}
+\end{equation*}
+We choose this because it is easy to sample from the $\Gamma(4,8)$ and U(0,5) distributions and, importantly, with our constant C, $Ch(\alpha, \beta)$ is close to our target distribution. 
+
+C is defined as follows:
+\begin{equation*}
+\begin{split}
+C = \underset{\alpha,\beta}{\arg \max} \frac{\pi(\alpha,\beta)L(x, \alpha,\beta)}{h(\alpha,\beta)}
+\end{split}
+\end{equation*}
+Since the prior and candidate distributions are the same we can simplify this to:
+\begin{equation*}
+\begin{split}
+C = \underset{\alpha,\beta}{\arg \max} L(x, \alpha,\beta)
+\end{split}
+\end{equation*}
+
+```{r, echo=F}
+ll <- function(a,b){ #loglikelihood 
+  summation=c(1:length(a)) #from the log_posterior_x function
+  for(i in 1:length(a)){
+    summation[i]=0
+    for (j in 1:200){
+      summation[i]= summation[i] + log( b[i]^2 + (x[j] - a[i])^2)
+    }
+  }
+  ll = 200*(log(b) - log(atan(a/b) + atan((5-a)/b))) - summation
+  return(ll)
+}
+```
+```{r, echo=F, include=F}
+logC = ll(ModeParams[1], ModeParams[2])
+logC
+C <- exp(logC)
+C
+```
+To find C, we need to compute the mode of the likelihood distribution. I made a function to compute the log-likelihood by using the code from the log-likelihood calculation section of the log posterior function. We will use this function with the optimal parameters for $\alpha$ and $\beta$ we calculated earlier to compute log(C) and then use that result to get C. We find $\log(C)=-260.248$ and $C\approx 9.459\times 10^{-114}$.
+
+Now that we've defined the target distribution, candidate distribution, C and most importantly, their corresponding log forms, we can define the log-$\gamma$ function which which is the criterion used to accept/reject a sample value. 
+\begin{equation*}
+\begin{split}
+\gamma(\alpha,\beta) = \frac{\pi(\alpha,\beta)L(x, \alpha,\beta)}{Ch(\alpha,\beta)} = \frac{L(x,\alpha,\beta)}{C}
+\end{split}
+\end{equation*}
+\begin{equation*}
+\begin{split}
+\log(\gamma(\alpha,\beta)) = \log(L(x,\alpha,\beta)) - \log(C)
+\end{split}
+\end{equation*}
+```{r, echo=F, include=F}
+log_gamma_ab <- function(a,b, LOGC){
+  ll(a,b) - LOGC 
+}
+```
+```{r, echo=F, include=F}
+ns <- 4000000
+cand_a <- runif(ns, min = 0, max = 5) 
+cand_b <- rgamma(ns, shape=4, rate = 8)
+
+g <- log_gamma_ab(cand_a, cand_b, logC)
+```
+We can now sample from the candidate distribution. I sampled 4 million values from U(0,5) and $\Gamma$(4,8) each for $\alpha$ and $\beta$ respectively. We compute the log-$\gamma$ values using the candidate samples for $\alpha$ and $\beta$, and log(C).
+```{r, echo=F, include=F}
+u <- runif(ns)
+sample_a = cand_a[log(u) < g] 
+sample_b = cand_b[log(u) < g]
+length(sample_a)
+```
+We then sample 4 million values from u~U(0,1) and compare log(u) to the log-$\gamma$ values to see which uniform values fit under our bounds. We keep the candidate samples for $\alpha$ and $\beta$ at the indices which have met our acceptance criteria i.e. the samples for which $\log(u)< \gamma(\alpha,\beta)$. We are now left with a sample of size of 21459 values from our posterior distribution (an acceptance probability of $5.36 \times 10^{-3}$). Obtaining the density of the samples allows us to plot them. 
+```{r, echo=F}
+knitr::opts_chunk$set(fig.cap = "Contour plot of the posterior mass of the accepted samples $\\alpha$ and $\\beta$.")
+```
+```{r, echo=F}
+#par(mar=c(4,4,1,2))
+da=density(sample_a)$x #density of a
+da=da[seq(1, length(da), 10)] 
+db=density(sample_b)$x #density of b
+db=db[seq(1, length(db), 10)]
+z1 = outer(da, db, post_x)
+filled.contour(da, db, z1, nlevels = 12, xlab = expression(alpha), ylab=expression(beta), color.palette = heat.colors, main = "Posterior Mass")
+```
+
+Figure 2 has its mass in a very similar place to its theoretical counterpart (Figure 1). The mode appears to be at (2.35, 0.75) and the majority of the mass lies between $\alpha \epsilon [2.2, 2.5]$ and $\beta \epsilon [0.6, 95]$. The 3-D posterior distribution plots in Figure 6 (see appendix) also look similar to their theoretical counterparts (see Figure 5, appendix) but it's worth noting the peak in Figure 6 isn't quite as sharp as Figure 5 because the density function uses smaller bounds for $\alpha$ and $\beta$ because of the distribution of the sample itself.
+
+
+\section{(b) Estimates Using Accepted Samples}
+```{r, echo=F, include=F}
+mean(sample_a) #mean a location
+mean(sample_b) #mean b location
+num_greater = sample_b[sample_b>0.55]
+length(num_greater)/length(sample_b) 
+```
+### (i) Estimated Location
+To estimate the location of the boat, we take the mean of our samples for $\alpha$ and $\beta$. The sampled location estimate for the boat is (2.36, 0.768). This isn't largely different from our initial mode of (2.358, 0.75).
+
+### (ii) Estimation of Pr($\beta>0.55$)
+To estimate Pr($\beta>0.55$) we divide the number of $\beta$ samples > 0.55 by the total number of samples. The resulting probability is 0.9989. It is therefore highly likely that $\beta>0.55$.
+
+
+\section{(c) Estimating $Pr(2.3 < \alpha < 3.2)$ with Monte Carlo Methods}
+### Understanding the Problem
+To generate our sample for $\alpha$ with the probability integral transform, we need to find the inverse of the CDF of our new posterior function given $\beta=0.5$. This new posterior function is:
+\begin{equation*}
+\begin{split}
+\pi(\alpha,|\beta=0.5, x) \propto (\frac{0.5}{A(\alpha,0.5)})^{200} * \Pi^{200}_{i=1}(\frac{1}{0.5^2+(x_i-\alpha)^2})
+\end{split}
+\end{equation*}
+I modified the functions for the posterior and log-posterior I used in (a) to take $\alpha$ only as a parameter and remove the terms that became constant given $\beta=0.5$. The new posterior also has most of the mass concentrated between $\alpha \epsilon [2.1,2.5]$ (see Figure 7, Appendix).
+```{r, echo=F, include=F}
+# new log-posterior
+log_post_xb <- function(a){ 
+  summation=c(1:length(a))
+  for(i in 1:length(a)){
+    summation[i]=0
+    for (j in 1:200){
+      summation[i]= summation[i] + log( 0.5^2 + (x[j] - a[i])^2)
+    }
+  }
+  ll = 200*(log(0.5) - log(atan(a/0.5) + atan((5-a)/0.5))) - summation
+  return (ll)
+}
+#new  posterior
+post_xb <- function(a){
+  return(exp(log_post_xb(a)))
+}
+```
+
+Using the new posterior function, we need to obtain the inverse of the CDF, $F^{-1}(u)$, which takes in u~U(0,1) and returns a value for $\alpha$.
+
+### Finding an Empirical CDF and its Inverse
+The first step to finding the CDF function is to scale the new posterior function such that it becomes a valid PDF (doing this helps prevent underflow later as well). I achieved this by integrating the new posterior over $\alpha \epsilon[0,5]$. Taking the reciprocal of this gives the proportionality constant, $k=3.6\times 10^{117}$, which we can then multiply our new posterior function by to transform it into a PDF. We confirm that it is a PDF by integrating the resulting function over $\alpha \epsilon[0,5]$ and our result is 1. A plot of the PDF is in the appendix (Figure 8) for interest's sake.
+```{r, echo=F, include=F}
+k=1/integrate(post_xb,0,5)$value #proportionality constant k
+k
+pdf <- function(a){
+  return(k*post_xb(a))
+}
+integrate(pdf,0,5)
+```
+
+
+```{r, echo=F}
+# function to construct the cdf with 1 million datapoints
+CDF = function(fn,min,max){
+  Range = seq(from=min,to=max,length=1000000)
+  cumsum=c(0)
+  for(i in 2:1000000){
+    if(!is.na(fn(Range[i]))){
+      cumsum[i]=cumsum[i-1]+fn(Range[i])
+    }
+    else
+      cumsum[i]=mpfr(cumsum[i-1],50)
+  }
+  scaledcdf = cumsum/cumsum[1000000]
+  return(scaledcdf)
+}
+# Function to return F(alpha)
+CDF.a = function(cdf,a){
+  index =200000*a
+  return(cdf[index])
+}
+```
+
+We will use the PDF to find the CDF. Finding the CDF with R's ecdf() function failed because the numbers either side of the large central mass were so small that they were registering as zero. To get around this, I built a CDF() function to calculate an empirical CDF using a million data points along $\alpha \epsilon[0,5]$. It works by iterating with the following approach: cdf[i]=cdf[i-1] + pdf[alpha[i]]. The final step is to scale the resulting vector by dividing every element by the value of the last index (so final index is = 1). I also created an accompanying function to return $F_{\alpha}(\alpha)$. 
+
+```{r, echo=F}
+knitr::opts_chunk$set(fig.cap = "Empirical cumulative distribution function for $\\pi ( \\alpha | \\beta = 0.5 , x)$.")
+```
+```{r, echo=F}
+cdfvector =CDF(pdf,0,5)
+plot(seq(from=0,to=5,length=1000000),cdfvector, cex=0.1, xlab = expression(alpha), ylab= expression(F[alpha](alpha)), col="#FF4500", main = "Empirical CDF")
+```
+
+\newpage
+We can confirm the CDF is correct by looking at Figure 3 as it has all the characteristics we'd expect of a CDF for our distribution (S-shape, sharp increase between 2.1 and 2.5, flat elsewhere).
+
+
+Next, I made a function for the inverse $F^{-1}(u)$. It takes a uniform sample (quartile), u, as a parameter and returns the value of $\alpha$ at that quartile by searching the CDF for the index containing the value closest to the given quartile and computes and returns the corresponding value for $\alpha$.
+```{r, echo=F}
+inverse = function(cdf,q){ 
+  index = which(abs(cdf - q) == min(abs(cdf - q)))
+  alpha = index/length(cdf)*5
+  return(alpha)
+}
+```
+
+### Sampling with the Probability Integral Transform Method
+We use the inverse function to get our $\alpha$ sample by sampling from U(0,1) and inverse transforming that sample. We will sample 20 000 values for $\alpha$.
+
+```{r, echo=F, include=F}
+ns2=20000
+uSample = runif(ns2)
+alpha_sample=c()
+for(i in 1:ns2){
+  alpha_sample[i] = inverse(cdfvector,uSample[i])
+}
+```
+
+```{r, echo=F}
+knitr::opts_chunk$set(fig.cap = "Distribution of the samples for $\\alpha$ obtained using the probability integral transform method.")
+```
+```{r, echo=F}
+hist(alpha_sample, xlab = expression(alpha), ylab="Density", freq = F, breaks=100, col ="#FF4500", main = "Monte Carlo Samples")
+```
+```{r, echo=F, include = F}
+integral = length(alpha_sample[alpha_sample>2.3 & alpha_sample<3.2])/ns2
+integral #the monte carlo integral result
+integrate(pdf,2.3,3.2) #integrating PDF
+CDF.a(cdfvector,3.2)-CDF.a(cdfvector,2.3) #integrating with CDF
+```
+
+### Monte Carlo Estimate and Monte Carlo Error 
+
+From Figure 4, we can see about half of the mass lies at $\alpha>2.3$ with no visible mass at $\alpha=3.2$.The shape of the sample distribution also appears normally distributed about the mean. To get the result using Monte Carlo Methods, we count the number of items in our sample between 2.3 and 3.2 and divide the count by the total samples. The result with our sampled data is $Pr(2.3< \alpha <3.2) = 0.5804$. Using R's integrate function with the PDF yields 0.589 and using our empirical CDF ($F_{\alpha}(3.2)-F_{\alpha}(2.3)$) yields 0.586 so our Monte Carlo estimate using 20 000 samples isn't too far off. With a larger sample we can expect our accuracy using Monte Carlo sampling to increase.
+
+```{r, echo=F,include=F}
+(var(alpha_sample)/ns2)^(1/2) #Monte Carlo SE
+```
+Using our sample we can compute the Monte Carlo Error using the following formula:
+\begin{equation*}
+\begin{split}
+SE(\hat{\theta}) = \frac{\sqrt{Var(F^{-1}(u))}}{\sqrt{N}}
+              &  =\frac{\sqrt{Var(\alpha)}}{\sqrt{N}}
+\end{split}
+\end{equation*}
+The Monte Carlo Error for the sample is $4.57\times10^{-4}$. With a larger sample we can expect this error to decrease $\propto \frac{1}{\sqrt{N}}$.
+
+\section{Appendix}
+```{r, echo=F}
+knitr::opts_chunk$set(fig.cap = "The posterior and log-posterior functions plotted using $\\alpha$ $\\epsilon$ [1e-8, 5] and $\\beta$ $\\epsilon$ [1e-8, 1.4]")
+```
+```{r echo=F, message=FALSE, warning=FALSE}
+a_range <- seq(from=1e-8, to=5, length=30)
+b_range <- seq(from=1e-8, to=1.4, length=30)
+
+z2 = outer(a_range, b_range, post_x)
+par(mfrow=c(1,2), mar=c(1,1,5,1))
+persp(a_range, b_range, z2, main="Posterior\n Probability", xlab="alpha", ylab= "ß",  zlab = "z",
+      col = "#FF4500", shade = 0, theta = 0, phi = 30)
+
+z3 = outer(a_range, b_range, log_post_x)
+persp(a_range, b_range, z3, main="Log Posterior\n Probability", xlab="alpha", ylab= "ß",  zlab = "z",
+      col = "red", shade = 0, theta = 0, phi = 30)
+```
+```{r, echo=F}
+knitr::opts_chunk$set(fig.cap = "Density plot of the posterior and log-posterior functions obtained using the accepted values for $\\alpha$ and $\\beta$.")
+```
+```{r, echo=F}
+par(mfrow=c(1,2), mar=c(1,1,5,1))
+z4 = outer(da, db, log_post_x) #uses density from contour plot
+par(mfrow=c(1,2), mar=c(1,1,5,1))
+
+persp(da, db, z1, main="Posterior\n Probability", xlab="alpha", ylab= "ß",  zlab = "z", col = "red", shade = 0, theta = 0, phi = 30, ticktype = 'simple', nticks=1)
+persp(da, db, z4, main="Log Posterior \n Probability", xlab="alpha", ylab= "ß",  zlab = "z", col = "red", shade = 0, theta = 0, phi = 30)
+```
+
+```{r, echo=F}
+knitr::opts_chunk$set(fig.cap = "New posterior distribution, $\\pi (\\alpha |\\beta =0.5,x)$")
+```
+```{r, echo=F}
+range_new = seq(0,5,length = 10000)
+
+plot(range_new, post_xb(range_new),cex=0.3, xlab=expression(alpha),
+     ylab=expression(paste(y%prop%pi,"(",alpha,"|",beta,"=0.5,x)")),
+     main = "New Posterior",col ="#FF4500")
+```
+```{r, echo=F}
+knitr::opts_chunk$set(fig.cap = "Scaled probability density function, $\\pi (\\alpha |\\beta =0.5,x)$ ")
+```
+```{r, echo=F}
+plot(range_new, pdf(range_new),cex=0.3, xlab=expression(alpha),
+     ylab=expression(paste(pi,"(",alpha,"|",beta,"=0.5,x)")),
+     main = "Posterior Probability Density Function",col ="#FF4500")
+```
+\newpage
+\newpage
+
+\section{References}
+
+DataMentor. n.d. R 3D Plot (With Examples). [online] Available at: <https://www.datamentor.io/r-programming/3d-plot/> [Accessed 10 April 2021].
+
+
+Mahmoudian, M. and Huber, M., 2017. Fastest way to find nearest value in vector. [online] Stack Overflow. Available at: <https://stackoverflow.com/questions/43472234/fastest-way-to-find-nearest-value-in-vector> [Accessed 10 April 2021].
+
+
+Rdocumentation.org. n.d. filled.contour function - Level (Contour) Plots. [online] Available at: <https://www.rdocumentation.org/packages/graphics/versions/3.6.2/topics/filled.contour> [Accessed 10 April 2021].
+
+
+Rdocumentation.org. n.d. integrate function - Integration of One-Dimensional Functions. [online] Available at: <https://www.rdocumentation.org/packages/stats/versions/3.6.2/topics/integrate> [Accessed 10 April 2021].
+
+
+Rdocumentation.org. n.d. persp function - Perspective Plots. [online] Available at: <https://www.rdocumentation.org/packages/graphics/versions/3.6.2/topics/persp> [Accessed 10 April 2021].
+
+
+
+
+
+
+
